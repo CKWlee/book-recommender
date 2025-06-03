@@ -1,150 +1,194 @@
 // src/api.js
 import axios from "axios";
 
-// A set of generic subjects to skip—too broad, leads to unhelpful recommendations.
+// Very broad subjects to skip (too generic)
 const GENERIC_SUBJECTS = new Set([
-  "novels",
   "fiction",
+  "novels",
   "american literature",
   "children's literature",
   "biography",
   "autobiography",
   "literature",
-  // Add more overly broad tags here if needed
+  "history",
+  "poetry",
+  "drama",
+  "memoirs",
+  "children's stories",
 ]);
 
 /**
- * Given a book title string, search Open Library for the first matching work.
- * Returns an object { id, title, subjects } or null if not found.
- */
-export async function fetchBookAndSubjects(title) {
-  try {
-    // 1) Search by title (limit=1)
-    const searchUrl = `https://openlibrary.org/search.json?title=${encodeURIComponent(
-      title
-    )}&limit=1`;
-    const searchRes = await axios.get(searchUrl);
-
-    if (!searchRes.data.docs || searchRes.data.docs.length === 0) {
-      throw new Error("No books found for title: " + title);
-    }
-
-    const doc = searchRes.data.docs[0];
-    // doc.key is like "/works/OL45883W"
-    const workKey = doc.key;
-
-    // 2) Fetch the work’s details to get its subjects
-    const workUrl = `https://openlibrary.org${workKey}.json`;
-    const workRes = await axios.get(workUrl);
-    const workData = workRes.data;
-
-    const subjects = workData.subjects || [];
-    return {
-      id: workKey,                     // e.g. "/works/OL45883W"
-      title: workData.title || doc.title,
-      subjects: subjects.slice(0, 5),  // keep top 5 subjects
-    };
-  } catch (err) {
-    console.error("Error in fetchBookAndSubjects:", err.message);
-    return null;
-  }
-}
-
-/**
- * Given a work ID (e.g. "/works/OL45883W"), fetch that work’s details directly.
- * Returns { id, title, subjects } or null if not found.
+ * Fetch a work’s basic info by its Open Library work‐key (e.g. "/works/OL12345W"):
+ * Returns { id, title, subjects[], languages[] } or null on error.
  */
 export async function fetchWorkByID(workKey) {
   try {
-    // workKey already begins with "/works/OLxxxxxW"
-    const workUrl = `https://openlibrary.org${workKey}.json`;
-    const workRes = await axios.get(workUrl);
-    const workData = workRes.data;
-
-    const subjects = workData.subjects || [];
+    const { data } = await axios.get(`https://openlibrary.org${workKey}.json`);
     return {
       id: workKey,
-      title: workData.title,
-      subjects: subjects.slice(0, 5),
+      title: data.title || "",
+      subjects: (data.subjects || []).slice(0, 10).map((s) => s.toLowerCase()),
+      languages: (data.languages || []).map((l) => l.key.split("/").pop()),
     };
-  } catch (err) {
-    console.error("Error in fetchWorkByID:", err.message);
+  } catch {
     return null;
   }
 }
 
 /**
- * Given one book‐object { id, title, subjects }, fetch up to 5 related works per subject.
- * - Skips any subject in GENERIC_SUBJECTS.
- * - Computes overlapCount = how many subjects each candidate shares.
- * - Keeps any candidate with overlapCount ≥ 1.
- * - Sorts by overlapCount descending (best matches first).
- * - Returns up to 10 recs.
+ * Given an array of queryBooks (each { id, title, subjects[], languages[] }),
+ * return up to 10 English recs. Each rec is tagged with matchingBookIds = Set of root IDs it matched.
  *
- * Returns array of { id, title, subjects, overlapCount }.
+ * 1) Compute each root’s filtered subjects (non‐generic).
+ * 2) Find intersection across all roots; search those subjects first.
+ * 3) Then, for each root individually, search that root's filtered subjects to collect root‐specific recs.
+ * 4) Finally, if still no recs for a particular root, do a simple title search on that root.
+ * 5) Sort by # of matching roots (descending), then by title (A→Z).
  */
-export async function fetchRecommendationsForBook(book) {
-  const allRecsMap = {}; // recId → { id, title, subjects, overlapCount }
-  const querySubjectsSet = new Set(book.subjects.map((s) => s.toLowerCase()));
+export async function fetchRecommendationsForBooks(queryBooks) {
+  if (!Array.isArray(queryBooks) || queryBooks.length === 0) {
+    return [];
+  }
 
-  for (let rawSubject of book.subjects) {
-    const normalized = rawSubject.toLowerCase();
-    if (GENERIC_SUBJECTS.has(normalized)) {
-      // Skip overly broad subjects
-      continue;
-    }
+  const MAX = 10;
+  const recsMap = {}; // workKey → { id, title, subjects, languages, matchingBookIds: Set }
 
-    // Normalize for URL: lowercase, strip punctuation, spaces → underscores
-    const subjKey = normalized
-      .replace(/[^a-z0-9 ]/g, "")  // remove punctuation
-      .replace(/ /g, "_");         // spaces → underscores
+  // 1) Build non‐generic subject lists for each root
+  const bookFilteredSubjects = queryBooks.map((b) =>
+    (b.subjects || [])
+      .map((s) => s.toLowerCase())
+      .filter((s) => !GENERIC_SUBJECTS.has(s))
+  );
 
+  // Helper to slugify a subject
+  const slugify = (raw) =>
+    raw
+      .toLowerCase()
+      .replace(/[^a-z0-9 ]/g, "")
+      .replace(/\s+/g, "_");
+
+  // Helper: do a subject search, tagging each result with the provided set of root IDs
+  async function subjectSearchAndTag(rootIdsSet, subj) {
+    if (Object.keys(recsMap).length >= MAX) return;
+    const slug = slugify(subj);
+    if (!slug) return;
+    const url = `https://openlibrary.org/search.json?subject="${encodeURIComponent(
+      slug
+    )}"&language=eng&limit=5`;
     try {
-      const subjectRes = await axios.get(
-        `https://openlibrary.org/subjects/${encodeURIComponent(subjKey)}.json?limit=5`
-      );
-      const works = subjectRes.data.works || [];
-
-      works.forEach((w) => {
-        const recId = w.key; // e.g., "/works/OL12345W"
-        if (recId === book.id) return; // do not recommend the original book
-
-        // Capture up to 5 subjects from this candidate
-        const recSubjects = (w.subject || []).slice(0, 5).map((s) => s.toLowerCase());
-
-        // Count how many subjects overlap
-        const overlapCount = recSubjects.reduce(
-          (count, subj) => (querySubjectsSet.has(subj) ? count + 1 : count),
-          0
-        );
-
-        // Only keep candidates with at least one shared subject
-        if (overlapCount >= 1) {
-          if (!allRecsMap[recId]) {
-            allRecsMap[recId] = {
-              id: recId,
-              title: w.title,
-              subjects: recSubjects,
-              overlapCount,
-            };
-          } else {
-            // If the same rec appears under multiple subjects, keep the max overlapCount
-            allRecsMap[recId].overlapCount = Math.max(
-              allRecsMap[recId].overlapCount,
-              overlapCount
-            );
-          }
+      const { data } = await axios.get(url);
+      for (let d of data.docs || []) {
+        if (!d.key || !d.title) continue;
+        const workKey = d.key; // "/works/OL12345W"
+        // If this rec is one of our roots, skip tagging
+        if ([...rootIdsSet].includes(workKey)) continue;
+        if (Object.keys(recsMap).length >= MAX) break;
+        let entry = recsMap[workKey];
+        if (!entry) {
+          entry = {
+            id: workKey,
+            title: d.title,
+            subjects: (d.subject || []).map((s) => s.toLowerCase()),
+            languages: ["eng"],
+            matchingBookIds: new Set(),
+          };
+          recsMap[workKey] = entry;
         }
-      });
-    } catch (e) {
-      console.warn(`No recs for subject "${rawSubject}"`, e.message);
+        // Add all rootIds in rootIdsSet to this rec’s matchingBookIds
+        rootIdsSet.forEach((rid) => entry.matchingBookIds.add(rid));
+      }
+    } catch {
+      // ignore errors
     }
   }
 
-  // Convert the map to an array and sort by overlapCount descending
-  const recArray = Object.values(allRecsMap);
-  recArray.sort((a, b) => b.overlapCount - a.overlapCount);
+  // 2) Intersection of all roots’ filtered subjects
+  let intersection = [...bookFilteredSubjects[0]];
+  for (let i = 1; i < bookFilteredSubjects.length; i++) {
+    intersection = intersection.filter((s) => bookFilteredSubjects[i].includes(s));
+  }
 
-  // Return up to 10 recommendations
-  return recArray.slice(0, 10);
+  // If there is an intersection, search those subjects and tag with ALL root IDs
+  if (intersection.length > 0) {
+    const allRootIds = new Set(queryBooks.map((b) => b.id));
+    for (let subj of intersection) {
+      if (Object.keys(recsMap).length >= MAX) break;
+      await subjectSearchAndTag(allRootIds, subj);
+    }
+  }
+
+  // 3) For each root individually, search its filtered subjects
+  for (let i = 0; i < queryBooks.length; i++) {
+    if (Object.keys(recsMap).length >= MAX) break;
+    const rootBook = queryBooks[i];
+    const rootId = rootBook.id;
+    const filtered = bookFilteredSubjects[i];
+
+    for (let subj of filtered) {
+      if (Object.keys(recsMap).length >= MAX) break;
+      await subjectSearchAndTag(new Set([rootId]), subj);
+    }
+  }
+
+  // 4) After all subject‐searching, if ANY root still has zero recs, fallback to a title search on that root
+  //    (We ensure every root gets at least some recommendations if none came from subjects.)
+  for (let i = 0; i < queryBooks.length; i++) {
+    if (Object.keys(recsMap).length >= MAX) break;
+    const rootBook = queryBooks[i];
+    const rootId = rootBook.id;
+
+    // Check if this root already matched at least one rec:
+    const rootHasRec = Object.values(recsMap).some((r) =>
+      r.matchingBookIds.has(rootId)
+    );
+    if (rootHasRec) continue;
+
+    // Perform title search on this root
+    const url = `https://openlibrary.org/search.json?title=${encodeURIComponent(
+      rootBook.title
+    )}&language=eng&limit=5`;
+    try {
+      const { data } = await axios.get(url);
+      for (let d of data.docs || []) {
+        if (!d.key || !d.title) continue;
+        const workKey = d.key;
+        if (workKey === rootId) continue;
+        if (Object.keys(recsMap).length >= MAX) break;
+        let entry = recsMap[workKey];
+        if (!entry) {
+          entry = {
+            id: workKey,
+            title: d.title,
+            subjects: (d.subject || []).map((s) => s.toLowerCase()),
+            languages: ["eng"],
+            matchingBookIds: new Set(),
+          };
+          recsMap[workKey] = entry;
+        }
+        entry.matchingBookIds.add(rootId);
+      }
+    } catch {
+      // ignore fallback errors
+    }
+  }
+
+  // 5) Convert recsMap to array and sort:
+  //    (a) by number of matchingBookIds descending (bridging recs first)
+  //    (b) then by title A→Z
+  const allRecs = Object.values(recsMap).map((e) => ({
+    id: e.id,
+    title: e.title,
+    subjects: e.subjects,
+    languages: e.languages,
+    matchingBookIds: [...e.matchingBookIds],
+  }));
+
+  allRecs.sort((a, b) => {
+    if (b.matchingBookIds.length !== a.matchingBookIds.length) {
+      return b.matchingBookIds.length - a.matchingBookIds.length;
+    }
+    return a.title.localeCompare(b.title);
+  });
+
+  return allRecs.slice(0, MAX);
 }

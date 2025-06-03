@@ -43,20 +43,8 @@ function App() {
         <SearchBar onBookSearch={handleBookSearch} />
       ) : (
         <>
-          {/* GraphView (SVG) */}
+          {/* GraphView (SVG + its built‐in gradient legend) */}
           <GraphView graphData={graphData} />
-
-          {/* Static Legend */}
-          <div className="legend">
-            <div className="legend-item">
-              <span className="legend-color warm"></span>
-              Warm: ≥ 2 connections
-            </div>
-            <div className="legend-item">
-              <span className="legend-color cold"></span>
-              Cold: 1 connection
-            </div>
-          </div>
 
           {/* “+” button to add another book */}
           <PlusButton onAddBook={handleAddBook} />
