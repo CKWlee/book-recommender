@@ -1,13 +1,217 @@
-body {
+/* src/index.css */
+
+/* ------------------------------- */
+/* 1) Reset and Background Gradient */
+body,
+html,
+#root {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  font-family: "Roboto", sans-serif;
+  background: linear-gradient(180deg, #f0f4f8 0%, #ffffff 100%);
+  overflow: hidden;
 }
 
-code {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
-    monospace;
+/* ------------------------------- */
+/* 2) SearchBar Container */
+.search-container {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) translateY(-10px);
+  opacity: 0;
+  transition: opacity 0.3s ease, transform 0.3s ease;
+  z-index: 10;
+  text-align: center;
 }
+
+.search-container.visible {
+  opacity: 1;
+  transform: translate(-50%, -50%) translateY(0);
+}
+
+.search-container.hidden {
+  opacity: 0;
+  transform: translate(-50%, -50%) translateY(-20px);
+}
+
+/* ------------------------------- */
+/* 3) Search Title */
+.search-title {
+  font-size: 28px;
+  font-weight: 500;
+  color: #1e88e5;           /* accent color */
+  margin: 0;
+  padding-bottom: 12px;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+/* ------------------------------- */
+/* 4) Search Form (centers input + button) */
+.search-form {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* ------------------------------- */
+/* 5) Search Input: Minimalistic, single-line */
+.search-input {
+  width: 360px;              /* wide, Google-like look */
+  padding: 12px 16px;
+  font-size: 16px;
+  border: 1px solid #ddd;
+  border-radius: 24px 0 0 24px; /* round left side */
+  outline: none;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.search-input:focus {
+  border-color: #1e88e5;
+  box-shadow: 0 4px 12px rgba(30, 136, 229, 0.2);
+}
+
+/* ------------------------------- */
+/* 6) Search Button: simple arrow, same background as input */
+.search-button {
+  background: white;               /* match the input’s white background */
+  border: 1px solid #ddd;          /* same border color */
+  border-left: none;               /* remove left border since input already has it */
+  color: #555;                      /* dark gray arrow */
+  padding: 12px 16px;
+  font-size: 18px;                  /* slightly larger arrow */
+  border-radius: 0 24px 24px 0;     /* round right side */
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+  transition: background 0.2s, color 0.2s;
+}
+
+.search-button:hover {
+  background: #f0f0f0;              /* a light gray on hover */
+  color: #1e88e5;                   /* blue arrow on hover */
+}
+
+/* ------------------------------- */
+/* 7) PlusButton Styling */
+@keyframes pulse {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.1);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.plus-button {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: #1e88e5;
+  color: white;
+  font-size: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  transition: background 0.3s;
+  animation: pulse 3s infinite;
+  animation-delay: 1s;
+  z-index: 5;
+}
+
+.plus-button:hover {
+  background: #1565c0;
+  animation: none;
+}
+
+/* ------------------------------- */
+/* 8) SVG Canvas Reset (GraphView) */
+svg {
+  width: 100vw;
+  height: 100vh;
+  background: transparent;
+  display: block;
+}
+
+/* ------------------------------- */
+/* 9) Static Legend (fixed position) */
+.legend {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  background: rgba(255, 255, 255, 0.85);
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #333;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+  z-index: 20;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.legend-item:last-child {
+  margin-bottom: 0;
+}
+
+.legend-color {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 6px;
+  border-radius: 2px;
+}
+
+.legend-color.warm {
+  background: tomato;
+}
+
+.legend-color.cold {
+  background: royalblue;
+}
+
+/* 10) Suggestions Dropdown */
+.suggestions-list {
+  position: absolute;
+  top: calc(50% + 64px); /* adjust if needed so dropdown sits just under the input */
+  left: 50%;
+  transform: translateX(-50%);
+  width: 360px;                /* match input width */
+  max-height: 240px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  background: white;
+  border: 1px solid #ddd;
+  border-top: none;            /* connect visually with input box */
+  border-radius: 0 0 8px 8px;  /* round only bottom corners */
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  overflow-y: auto;
+  z-index: 15;
+}
+
+.suggestion-item {
+  padding: 10px 14px;
+  font-size: 16px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.suggestion-item:hover,
+.suggestion-item:focus {
+  background: #f5f5f5;
+}
+
